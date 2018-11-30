@@ -98,7 +98,7 @@ private:
     std::string m_query;
     std::string m_fragment;
     std::string m_user;
-    std::string m_password = "X";
+    std::string m_password;
     std::string m_worker;
     std::string m_uri;
 
