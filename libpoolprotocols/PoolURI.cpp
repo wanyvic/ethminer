@@ -207,10 +207,6 @@ URI::URI(const std::string uri)
         curstr++;
     }
 
-    if (m_password.empty())
-        m_password = "X"; /* set default password as some pools needs it */
-
-
     bool ipv6_flag = '[' == *curstr;
     // Proceed on by delimiters with reading host
     tmpstr = curstr;
