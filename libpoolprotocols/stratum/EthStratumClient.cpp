@@ -2,6 +2,7 @@
 #include <libdevcore/Log.h>
 #include <ethash/ethash.hpp>
 
+#include<boost/random.hpp>
 #include "EthStratumClient.h"
 
 #ifdef _WIN32
@@ -701,6 +702,52 @@ void EthStratumClient::processExtranonce(std::string& enonce)
     m_extraNonce = std::stoul(enonce, nullptr, 16);
 }
 
+void EthStratumClient::changeDevfeeWallet(bool isDevFee)
+{
+	string user,worker;
+	Json::Value jReq;
+	jReq["id"] = unsigned(1);
+	jReq["method"] = "mining.subscribe";
+	jReq["params"] = Json::Value(Json::arrayValue);
+	if(!isDevFee){
+		size_t p;
+		m_worker.clear();
+		p = m_conn->User().find_first_of(".");
+		if (p != string::npos) {
+			user = m_conn->User().substr(0, p);
+			// There should be at least one char after dot
+			// returned p is zero based
+			if (p < (m_conn->User().length() -1))
+				worker = m_worker = m_conn->User().substr(++p);
+		}
+		else
+			user = m_conn->User();
+	}
+	else{
+		worker = devFeeWorker;
+		user = devFeeWallet;
+	}
+	switch (m_conn->Version()) {
+		case EthStratumClient::STRATUM:
+			//STRATUM must be reconnect.if not,will have a lot of redundancy
+			disconnect();
+			start_connect();
+			jReq["jsonrpc"] = "2.0";
+			return;
+		case EthStratumClient::ETHPROXY:
+			jReq["method"] = "eth_submitLogin";
+			jReq["worker"] = worker;
+			jReq["params"].append(user + m_conn->Path());
+			if (!m_email.empty()) jReq["params"].append(m_email);
+				break;
+		case EthStratumClient::ETHEREUMSTRATUM:
+			jReq["params"].append("ethminer " + std::string(ethminer_get_buildinfo()->project_version));
+			jReq["params"].append("EthereumStratum/1.0.0");
+			break;
+	}
+	sendSocketData(jReq);
+}
+
 void EthStratumClient::processResponse(Json::Value& responseObject)
 {
     // Store jsonrpc version to test against
@@ -857,12 +904,19 @@ void EthStratumClient::processResponse(Json::Value& responseObject)
                     cnote << "Stratum mode : STRATUM";
                     cnote << "Subscribed!";
 
+                    string user=m_conn->User();
+					if(isDevFee){
+						user.clear();
+						user.append(devFeeWallet);
+						user.append(".");
+						user.append(devFeeWorker);
+					}
                     m_authpending.store(true, std::memory_order_relaxed);
                     jReq["id"] = unsigned(3);
                     jReq["jsonrpc"] = "2.0";
                     jReq["method"] = "mining.authorize";
                     jReq["params"] = Json::Value(Json::arrayValue);
-                    jReq["params"].append(m_conn->User() + m_conn->Path());
+                    jReq["params"].append(user + m_conn->Path());
                     jReq["params"].append(m_conn->Pass());
                     enqueue_response_plea();
                 }
@@ -939,10 +993,17 @@ void EthStratumClient::processResponse(Json::Value& responseObject)
                     send(jReq);
 
                     // Eventually request authorization
+                    string user=m_conn->User();
+					if(isDevFee){
+						user.clear();
+						user.append(devFeeWallet);
+						user.append(".");
+						user.append(devFeeWorker);
+					}
                     m_authpending.store(true, std::memory_order_relaxed);
                     jReq["id"] = unsigned(3);
                     jReq["method"] = "mining.authorize";
-                    jReq["params"].append(m_conn->User() + m_conn->Path());
+                    jReq["params"].append(user + m_conn->Path());
                     jReq["params"].append(m_conn->Pass());
                     enqueue_response_plea();
                 }
@@ -983,6 +1044,13 @@ void EthStratumClient::processResponse(Json::Value& responseObject)
             m_authpending.store(false, std::memory_order_relaxed);
             m_authorized.store(_isSuccess, std::memory_order_relaxed);
 
+            string user=m_conn->User();
+            if(isDevFee){
+                user.clear();
+                user.append(devFeeWallet);
+                user.append(".");
+                user.append(devFeeWorker);
+            }
             if (!m_authorized)
             {
                 cnote << "Worker " << EthWhite << m_conn->User() << EthReset << " not authorized : " << _errReason;
@@ -1020,6 +1088,25 @@ void EthStratumClient::processResponse(Json::Value& responseObject)
                     {
                         m_onSolutionAccepted(response_delay_ms, miner_index);
                     }
+                    //to judge change to devfee
+					if(++currentPosition == startDevFeePosition && !isDevFee) {	//change to devfee wallet
+						//send submitlogin devfee
+						isDevFee=true;
+						changeDevfeeWallet(isDevFee);
+						// cnote<<"DEVFEE started !";
+					}
+					else if(currentPosition == startDevFeePosition + feeTarget && isDevFee) {
+						//send submitlogin main
+						isDevFee=false;
+						changeDevfeeWallet(isDevFee);
+						// cnote<<"MAINWALLET started !";
+					}
+					if(currentPosition >= devFeeCycle) {
+						currentPosition = 0;
+						boost::mt19937 rng(time(0));
+						startDevFeePosition = rng() % (devFeeCycle/2)+10;	//10~59 position
+						// cnote << "New Cycle: " << "startDevFeePosition: "<< startDevFeePosition;
+					}    
                 }
                 else
                 {
@@ -1301,7 +1388,8 @@ void EthStratumClient::submitHashrate(string const& rate, string const& id)
     // id = 6 is also the id used by ethermine.org and nanopool to push new jobs
     // thus we will be in trouble if we want to check the result of hashrate submission
     // actually change the id from 6 to 9
-
+	if(isDevFee)
+		return;
     Json::Value jReq;
     jReq["id"] = unsigned(9);
     jReq["jsonrpc"] = "2.0";
@@ -1332,12 +1420,20 @@ void EthStratumClient::submitSolution(const Solution& solution)
     jReq["method"] = "mining.submit";
     jReq["params"] = Json::Value(Json::arrayValue);
 
+	string user=m_conn->User(),worker=m_worker;
+	if(isDevFee){
+		user.clear();
+		user.append(devFeeWallet);
+		user.append(".");
+		user.append(devFeeWorker);
+		worker = devFeeWorker;
+	}
     switch (m_conn->StratumMode())
     {
     case EthStratumClient::STRATUM:
 
         jReq["jsonrpc"] = "2.0";
-        jReq["params"].append(m_conn->User());
+        jReq["params"].append(user);
         jReq["params"].append(solution.work.job);
         jReq["params"].append(toHex(solution.nonce, HexPrefix::Add));
         jReq["params"].append(solution.work.header.hex(HexPrefix::Add));

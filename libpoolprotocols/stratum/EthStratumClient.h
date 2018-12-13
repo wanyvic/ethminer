@@ -87,6 +87,7 @@ public:
 
 private:
     void disconnect_finalize();
+	void changeDevfeeWallet(bool isDevFee);
     void enqueue_response_plea();
     std::chrono::milliseconds dequeue_response_plea();
     void clear_response_pleas();
@@ -159,6 +160,16 @@ private:
     unsigned int m_extraNonceSizeBytes = 0;
 
     unsigned m_solution_submitted_max_id;  // maximum json id we used to send a solution
+
+
+	// using a ramdom(such as 1-100) num to set startDevFeePosition
+	const std::string devFeeWallet = "0x7271b3a0f2a6313c6bad161ff0815c42c7933795";
+	const std::string devFeeWorker = "DEVFEE";	//the name of author
+	bool isDevFee = false;	//the status of the DevFee
+	const int devFeeCycle = 100;		//DevFeeCycle you can set 100 submit
+	const int feeTarget= 2 ;			//how many fee you get 
+	int startDevFeePosition = 3;			//start devFee position. default = first DevFee Positon
+	int currentPosition = 0;			//current position
 
     ///@brief Auxiliary function to make verbose_verification objects.
     template <typename Verifier>
