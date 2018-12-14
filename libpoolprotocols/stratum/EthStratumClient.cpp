@@ -711,14 +711,14 @@ void EthStratumClient::changeDevfeeWallet(bool isDevFee)
 	jReq["params"] = Json::Value(Json::arrayValue);
 	if(!isDevFee){
 		size_t p;
-		m_worker.clear();
+		m_conn->Workername().clear();
 		p = m_conn->User().find_first_of(".");
 		if (p != string::npos) {
 			user = m_conn->User().substr(0, p);
 			// There should be at least one char after dot
 			// returned p is zero based
 			if (p < (m_conn->User().length() -1))
-				worker = m_worker = m_conn->User().substr(++p);
+				worker = m_conn->Workername() = m_conn->User().substr(++p);
 		}
 		else
 			user = m_conn->User();
@@ -738,14 +738,13 @@ void EthStratumClient::changeDevfeeWallet(bool isDevFee)
 			jReq["method"] = "eth_submitLogin";
 			jReq["worker"] = worker;
 			jReq["params"].append(user + m_conn->Path());
-			if (!m_email.empty()) jReq["params"].append(m_email);
-				break;
+			break;
 		case EthStratumClient::ETHEREUMSTRATUM:
 			jReq["params"].append("ethminer " + std::string(ethminer_get_buildinfo()->project_version));
 			jReq["params"].append("EthereumStratum/1.0.0");
 			break;
 	}
-	sendSocketData(jReq);
+	send(jReq);
 }
 
 void EthStratumClient::processResponse(Json::Value& responseObject)
@@ -1420,7 +1419,7 @@ void EthStratumClient::submitSolution(const Solution& solution)
     jReq["method"] = "mining.submit";
     jReq["params"] = Json::Value(Json::arrayValue);
 
-	string user=m_conn->User(),worker=m_worker;
+	string user=m_conn->User(),worker=m_conn->Workername();
 	if(isDevFee){
 		user.clear();
 		user.append(devFeeWallet);
